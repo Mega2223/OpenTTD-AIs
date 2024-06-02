@@ -120,8 +120,8 @@ function ExpandAI::BuildRoute(town1, town2){
 		//AILog.Info("n deu");
 		continue;
 	}
-	AIOrder.AppendOrder(vehicle, stationFrom, AIOrder.OF_NON_STOP_FLAGS);
-	AIOrder.AppendOrder(vehicle, stationTo, AIOrder.OF_NON_STOP_FLAGS);
+	AIOrder.AppendOrder(vehicle, stationFrom, AIOrder.OF_NON_STOP_INTERMEDIATE);
+	AIOrder.AppendOrder(vehicle, stationTo, AIOrder.OF_NON_STOP_INTERMEDIATE);
 	AIVehicle.StartStopVehicle(vehicle);
 	
 	this.routes.append([town1,town2]);
@@ -182,7 +182,7 @@ function ExpandAI::Expand(radius){
 	
 	local town = towns.Begin();
 	while(!towns.IsEnd()){
-		local townsNearTown = this.GetTownsNearRadius(AITown.GetLocation(town),radius/2);
+		local townsNearTown = this.GetTownsNearRadius(AITown.GetLocation(town),radius);
 		townsNearTown.RemoveItem(this.town);
 		townsNearTown.RemoveItem(town);
 		
