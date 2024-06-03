@@ -4,6 +4,7 @@ class ExpandAI extends AIController
   radius = 10;
   town = 0;
   depot = 0;
+  agressiveness = 0;
   
   function Start();
   function SelectRandomTown();
@@ -15,11 +16,17 @@ class ExpandAI extends AIController
   function Expand();
   function GetTownsNearRadius();
   function HasPaxRoute();
+  function DismantleUnprofitableRoutes();
   
   routes = null;
   
   constructor(){
-	routes = []
+	this.routes = []
+	if(agressiveness == 0){
+		agressiveness = AIBase.RandRange(9)+1;
+		if(AIBase.RandRange(2) == 0){this.agressiveness *= -1;}
+	}
+	AILog.Info("Agressiveness = " + this.agressiveness);
   }
   
 }
@@ -96,8 +103,6 @@ function ExpandAI::BuildAtTown(town){
 }
 
 function ExpandAI::BuildRoute(town1, town2){
-	AILog.Info(AITown.GetName(town1) + " -> " + AITown.GetName(town2));
-	
 
 	local stationFrom = this.HasStationAtTown(town1);
 	while(stationFrom == null){stationFrom = this.BuildAtTown(town1);}
@@ -114,17 +119,15 @@ function ExpandAI::BuildRoute(town1, town2){
 	}
 		
 	local vehicle = this.SelectValidPax(depot);
-	while(vehicle == null){
-		this.Sleep(10);
-		vehicle = this.SelectValidPax(depot);
-		//AILog.Info("n deu");
-		continue;
+	if(vehicle == null){
+		return null;
 	}
 	AIOrder.AppendOrder(vehicle, stationFrom, AIOrder.OF_NON_STOP_INTERMEDIATE);
 	AIOrder.AppendOrder(vehicle, stationTo, AIOrder.OF_NON_STOP_INTERMEDIATE);
 	AIVehicle.StartStopVehicle(vehicle);
 	
 	this.routes.append([town1,town2]);
+	AILog.Info(AITown.GetName(town1) + " -> " + AITown.GetName(town2));
 	return vehicle;
 }
 
@@ -182,7 +185,9 @@ function ExpandAI::Expand(radius){
 	
 	local town = towns.Begin();
 	while(!towns.IsEnd()){
-		local townsNearTown = this.GetTownsNearRadius(AITown.GetLocation(town),radius);
+		local rang = this.agressiveness < 0 ? - radius / this.agressiveness : radius * this.agressiveness; 
+	
+		local townsNearTown = this.GetTownsNearRadius(AITown.GetLocation(town),rang);
 		townsNearTown.RemoveItem(this.town);
 		townsNearTown.RemoveItem(town);
 		
@@ -197,16 +202,51 @@ function ExpandAI::Expand(radius){
 				continue;
 			}
 			
-			this.BuildRoute(town,currentTown);
+			local vehicle = this.BuildRoute(town,currentTown);
 			currentTown = townsNearTown.Next();
+			if(vehicle == null){return false;}
 		}
 		
 		town = towns.Next();
 	}
+	return true;
+}
+
+function ExpandAI::DismantleUnprofitableRoutes(){
+	local vehicleFun = function(id){
+		return AICargo.GetName(AIEngine.GetCargoType(AIVehicle.GetEngineType(id))) == "Passengers";
+	}
+	local vehicles = AIVehicleList(vehicleFun);
+	
+	local unprofitables = []
+	for(local vehicle = vehicles.Begin(); !vehicles.IsEnd(); vehicle = vehicles.Next()){
+		
+		local age = AIVehicle.GetAge(vehicle);
+		local profitsLast = AIVehicle.GetProfitLastYear(vehicle);
+		local profits = AIVehicle.GetProfitThisYear(vehicle);
+		local name = AIVehicle.GetName(vehicle);
+		//AILog.Info(profits + "");
+		if(age > 365 && profits < -100 && profitsLast < -100 && !AIVehicle.IsInDepot(vehicle) && AIOrder.IsCurrentOrderPartOfOrderList(vehicle)){
+
+			AILog.Info(name + " deemed too unprofitable");
+			
+			AIVehicle.SendVehicleToDepot(vehicle);
+		}
+		if(AIVehicle.IsStoppedInDepot(vehicle)){
+				AIVehicle.SellVehicle(vehicle);
+				AILog.Info(name + " sold");
+		};
+	}
+	for(local vehicle = vehicles.Begin(); !vehicles.IsEnd(); vehicle = vehicles.Next()){
+			local name = AIVehicle.GetName(vehicle);
+			
+	}
+	
+	
 }
 
 function ExpandAI::Start() {
-	AICompany.SetName("Mega2223 Inc.");
+	AICompany.SetName("Mega2223 Inc. " + this.agressiveness);
   
 	AILog.Info("Rodando na " + AIController.GetVersion());
   
@@ -220,10 +260,10 @@ function ExpandAI::Start() {
 	
 	while (true) {
 		//AILog.Info("Tick " + this.GetTick());
-		AILog.Info("Radius = " + this.radius)
+		//AILog.Info("Radius = " + this.radius)
 		//AILog.Info("THE G");
-		this.Expand(radius);
+		this.DismantleUnprofitableRoutes();
 		this.Sleep(1);
-		this.radius+=300;
+		if(this.Expand(radius)){this.radius+=300;}
 	}
 }
