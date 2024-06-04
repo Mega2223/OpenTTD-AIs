@@ -1,7 +1,9 @@
+require("pax_utils.nut");
+
 class ExpandAI extends AIController 
 {
 
-  radius = 10;
+  radius = 0;
   town = 0;
   depot = 0;
   agressiveness = 0;
@@ -9,19 +11,23 @@ class ExpandAI extends AIController
   function Start();
   function SelectRandomTown();
   function FindTown();
-  function BuildAtTown(town);
-  function HasStationAtTown(town);
+  function BuildPaxStationAtTown(town);
+  function GetStationAtTown(town);
   function BuildDepot();
   function SelectValidPax(depot);
   function Expand();
   function GetTownsNearRadius();
-  function HasPaxRoute();
+  function HasPaxRoute(city1, city2);
   function DismantleUnprofitableRoutes();
+  function GetPaxRouteFromVehicle(vehicle);
+  function IsRouteBlacklisted(town1, town2);
   
   routes = null;
+  blacklistedRoutes = null;
+  pax_utils = EAIPathUtils();
   
   constructor(){
-	this.routes = []
+	this.routes = []; this.blacklistedRoutes = [];
 	if(agressiveness == 0){
 		agressiveness = AIBase.RandRange(9)+1;
 		if(AIBase.RandRange(2) == 0){this.agressiveness *= -1;}
@@ -48,16 +54,26 @@ function  ExpandAI::SelectRandomTown(){
 
 function ExpandAI::TrueFun(id){return true;}
 
-function ExpandAI::HasStationAtTown(town){
+function ExpandAI::GetStationAtTown(town){
 	local stations = AIStationList(AIStation.STATION_BUS_STOP);
 	for(local station = stations.Begin(); !stations.IsEnd(); station = stations.Next()){
 		local closest = AIStation.GetNearestTown(station);
 		if(closest == town){
 			return AIStation.GetLocation(station);
-			AILog.Info("wtf");
+			//AILog.Info("wtf");
 		}
 	}
 	return null;
+}
+
+function ExpandAI::IsRouteBlacklisted(town1, town2){
+	for(local i = 0; i < this.blacklistedRoutes.len; i++){
+		if(
+			(this.blacklistedRoutes[i][0] == town1 && this.blacklistedRoutes[i][1] == town2) ||
+			(this.blacklistedRoutes[i][1] == town1 && this.blacklistedRoutes[i][0] == town2)
+		){return true;}
+	}
+	return false;
 }
 
 function ExpandAI::SelectValidPax(depot){
@@ -74,18 +90,28 @@ function ExpandAI::SelectValidPax(depot){
 	return null;
 }
 
-function ExpandAI::BuildAtTown(town){
+function ExpandAI::BuildPaxStationAtTown(town){
+	local station = this.GetStationAtTown(town);
+	if(station != null){return station;}
 	local coord = AITown.GetLocation(town);
 	local cx = AIMap.GetTileX(coord);
 	local cz = AIMap.GetTileY(coord);
 	local success = false;
 	local tile = 0;
-		
-	for(local r = 0; r < 4; r++){
-		for(local x = -4; x < 4; x++){
-				for(local z = -4; z < 4; z++){
-					local tileToTry = AIMap.GetTileIndex(cx+r*x,cz+r*z);
+	AILog.Info("Building central pax at " + AITown.GetName(town));
+	for(local r = 1; r < 16; r++){
+		for(local x = 0; x < 32; x++){
+				for(local z = 0; z < 32; z++){
+					local tryX = x % 2 == 0 ? x/2 : -x/2;
+					local tryZ = z % 2 == 0 ? z/2 : -z/2;
+					local tileToTry = AIMap.GetTileIndex(cx+(r*tryX),cz+(r*tryZ));
 					if(!AIRoad.IsRoadTile(tileToTry) || success){continue;}
+					
+					if(AICompany.GetBankBalance(AICompany.COMPANY_SELF) < 1000){
+						AILog.Info("Not enough money :'(");
+						return null;
+					}
+					
 					local t1 = AIMap.GetTileIndex(cx+x+1,cz+z);
 					local t2 = AIMap.GetTileIndex(cx+x-1,cz+z);
 					local t3 = AIMap.GetTileIndex(cx+x,cz+z+1);
@@ -95,7 +121,11 @@ function ExpandAI::BuildAtTown(town){
 					success = success || AIRoad.BuildDriveThroughRoadStation(tileToTry,t2,AIRoad.ROADVEHTYPE_BUS,AIStation.STATION_NEW);
 					success = success || AIRoad.BuildDriveThroughRoadStation(tileToTry,t3,AIRoad.ROADVEHTYPE_BUS,AIStation.STATION_NEW);
 					success = success || AIRoad.BuildDriveThroughRoadStation(tileToTry,t4,AIRoad.ROADVEHTYPE_BUS,AIStation.STATION_NEW);
-					if(success){return tileToTry;}
+					if(success){
+						AILog.Info("Built station " + AIStation.GetName(AIStation.GetStationID(tileToTry)));
+						return tileToTry;
+
+					}
 				}
 			}
 		}
@@ -104,18 +134,22 @@ function ExpandAI::BuildAtTown(town){
 
 function ExpandAI::BuildRoute(town1, town2){
 
-	local stationFrom = this.HasStationAtTown(town1);
-	while(stationFrom == null){stationFrom = this.BuildAtTown(town1);}
+	local stationFrom = this.GetStationAtTown(town1);
+	if(stationFrom == null){stationFrom = this.BuildPaxStationAtTown(town1);}
 
-	local stationTo = this.HasStationAtTown(town2);
-	while(stationTo == null){stationTo = this.BuildAtTown(town2);}
+	local stationTo = this.GetStationAtTown(town2);
+	if(stationTo == null){stationTo = this.BuildPaxStationAtTown(town2);}
+	
+	if(stationFrom == null || stationTo == null){
+		return null;
+	}
 		
 	while(!AIStation.IsValidStation(AIStation.GetStationID(stationFrom))){
-		stationFrom = this.HasStationAtTown(town1);
+		stationFrom = this.GetStationAtTown(town1);
 	}
 		
 	while(!AIStation.IsValidStation(AIStation.GetStationID(stationTo))){
-		stationTo = this.HasStationAtTown(town2);
+		stationTo = this.GetStationAtTown(town2);
 	}
 		
 	local vehicle = this.SelectValidPax(depot);
@@ -126,9 +160,18 @@ function ExpandAI::BuildRoute(town1, town2){
 	AIOrder.AppendOrder(vehicle, stationTo, AIOrder.OF_NON_STOP_INTERMEDIATE);
 	AIVehicle.StartStopVehicle(vehicle);
 	
-	this.routes.append([town1,town2]);
+	this.routes.append([town1,town2,vehicle]);
 	AILog.Info(AITown.GetName(town1) + " -> " + AITown.GetName(town2));
 	return vehicle;
+}
+
+function ExpandAI::GetPaxRouteFromVehicle(vehicle){
+	for(local i = 0; i < this.routes.len(); i++){
+		if (this.routes[i][2] == vehicle){
+			return this.routes[i];
+		}
+	}
+	return null;
 }
 
 function ExpandAI::BuildDepot(town){
@@ -166,7 +209,7 @@ function ExpandAI::BuildDepot(town){
 
 function ExpandAI::GetTownsNearRadius(tileIndex,radius){
 	local IsTownUnderRadius = function(town_id,tileIndex,radius){
-		return AIMap.DistanceSquare(AITown.GetLocation(town_id),tileIndex) <= radius;
+		return AIMap.DistanceMax(AITown.GetLocation(town_id),tileIndex) <= radius;
 	};
 	return AITownList(IsTownUnderRadius,tileIndex,radius);
 }
@@ -188,7 +231,7 @@ function ExpandAI::Expand(radius){
 		local rang = this.agressiveness < 0 ? - radius / this.agressiveness : radius * this.agressiveness; 
 	
 		local townsNearTown = this.GetTownsNearRadius(AITown.GetLocation(town),rang);
-		townsNearTown.RemoveItem(this.town);
+		//townsNearTown.RemoveItem(this.town);
 		townsNearTown.RemoveItem(town);
 		
 		if(townsNearTown.Count() <= 1){town = towns.Next(); continue;}
@@ -204,12 +247,27 @@ function ExpandAI::Expand(radius){
 			
 			local vehicle = this.BuildRoute(town,currentTown);
 			currentTown = townsNearTown.Next();
-			if(vehicle == null){return false;}
+			if(vehicle == null){return false;} else {return true;}
 		}
 		
 		town = towns.Next();
 	}
 	return true;
+}
+
+function ExpandAI::GetVehicleRoute(vehicle){
+	for(local r = 0; r < this.routes.len; r++){
+		local act = this.routes[r];
+		if(act[2] == vehicle){return act;}
+	}
+	return null;
+}
+
+function ExpandAI::RemoveRoute(route, blacklist){
+	AIVehicle.SendVehicleToDepot(vehicle);
+	if(blacklist){
+		this.blacklistedRoutes.append(this.GetPaxRouteFromVehicle(vehicle));
+	}
 }
 
 function ExpandAI::DismantleUnprofitableRoutes(){
@@ -227,10 +285,9 @@ function ExpandAI::DismantleUnprofitableRoutes(){
 		local name = AIVehicle.GetName(vehicle);
 		//AILog.Info(profits + "");
 		if(age > 365 && profits < -100 && profitsLast < -100 && !AIVehicle.IsInDepot(vehicle) && AIOrder.IsCurrentOrderPartOfOrderList(vehicle)){
-
 			AILog.Info(name + " deemed too unprofitable");
+			this.GetVehicleRoute
 			
-			AIVehicle.SendVehicleToDepot(vehicle);
 		}
 		if(AIVehicle.IsStoppedInDepot(vehicle)){
 				AIVehicle.SellVehicle(vehicle);
@@ -260,10 +317,18 @@ function ExpandAI::Start() {
 	
 	while (true) {
 		//AILog.Info("Tick " + this.GetTick());
-		//AILog.Info("Radius = " + this.radius)
 		//AILog.Info("THE G");
+		
+		while(AICompany.GetBankBalance(AICompany.COMPANY_SELF) < 10000){
+			this.Sleep(100);
+			this.DismantleUnprofitableRoutes();
+		}
 		this.DismantleUnprofitableRoutes();
 		this.Sleep(1);
-		if(this.Expand(radius)){this.radius+=300;}
+		if(this.Expand(radius)){
+			local addValue = this.radius/50;
+			this.radius += addValue > 0 ? addValue : 1;
+			AILog.Info("Radius = " + this.radius);
+		}
 	}
 }
