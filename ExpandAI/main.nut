@@ -1,5 +1,7 @@
-require("pax_utils.nut");
+require("utils.nut");
 require("route.nut");
+
+local Utils = EAIUtils();
 
 class ExpandAI extends AIController 
 {
@@ -25,7 +27,6 @@ class ExpandAI extends AIController
   
   routes = null;
   blacklistedRoutes = null;
-  pax_utils = EAIPathUtils();
   
   constructor(){
 	this.routes = []; this.blacklistedRoutes = [];
@@ -69,10 +70,8 @@ function ExpandAI::GetStationAtTown(town){
 
 function ExpandAI::IsRouteBlacklisted(town1, town2){
 	for(local i = 0; i < this.blacklistedRoutes.len(); i++){
-		if(
-			(this.blacklistedRoutes[i][0] == town1 && this.blacklistedRoutes[i][1] == town2) ||
-			(this.blacklistedRoutes[i][1] == town1 && this.blacklistedRoutes[i][0] == town2)
-		){return true;}
+		local r = this.blacklistedRoutes[i];
+		if((r.GetTownFrom() == town1 && r.GetTownTo() == town2) || (r.GetTownFrom() == town2 && r.GetTownTo() == town1)){return true;}
 	}
 	return false;
 }
@@ -243,7 +242,7 @@ function ExpandAI::Expand(radius){
 		
 		while(!townsNearTown.IsEnd()){
 			//AILog.Info("THE G");
-			if(this.HasPaxRoute(town,currentTown)){
+			if(this.HasPaxRoute(town,currentTown) || this.IsRouteBlacklisted(town,currentTown)){
 				currentTown = townsNearTown.Next();
 				continue;
 			}
@@ -287,6 +286,18 @@ function ExpandAI::DismantleUnprofitableRoutes(){
 	}
 }
 
+function ExpandAI::ExpandRoutesAsNeeded(){
+	for(local r = 0; r < this.routes.len(); r++){
+		local route = this.routes[r];
+		//AILog.Info(route.AsString() + ": " + route.ProfitsLastYear() + " " + route.GetCargoWaitingAmount() + " " + route.YoungestAge());
+		if(route.ProfitsLastYear() > 1000 && route.GetCargoWaitingAmount() > 750 && route.YoungestAge() > 180){
+			AILog.Info("Expanding route: " + route.AsString());
+			route.BuyVehicle(null,this.depot);
+			break;
+		}
+	}
+}
+
 function ExpandAI::Start() {
 	AICompany.SetName("Mega2223 Inc. " + this.agressiveness);
   
@@ -303,18 +314,23 @@ function ExpandAI::Start() {
 	while (true) {
 		//AILog.Info("Tick " + this.GetTick());
 		//AILog.Info("THE G");
-		
-		while(AICompany.GetBankBalance(AICompany.COMPANY_SELF) < 10000){
+		local amountToKeep = AICompany.GetQuarterlyIncome(AICompany.COMPANY_SELF,AICompany.CURRENT_QUARTER);
+		amountToKeep = amountToKeep < 10000 ? 10000 : amountToKeep;
+		while(AICompany.GetBankBalance(AICompany.COMPANY_SELF) < amountToKeep){
 			this.Sleep(100);
 			this.DismantleUnprofitableRoutes();
 		}
 		this.DismantleUnprofitableRoutes();
+		this.ExpandRoutesAsNeeded();
 		//AILog.Info("Tick " + AIController.GetTick());
 		
 		if(this.Expand(radius)){
-			local addValue = this.radius/50;
-			this.radius += addValue > 0 ? addValue : 1;
-			AILog.Info("Radius = " + this.radius);
+			local addValue = this.radius / 150;//this.radius/50;
+			if(this.radius <= AIMap.GetMapSizeX()*10 && this.radius <= AIMap.GetMapSizeY()*10){
+				this.radius += addValue > 0 ? addValue : 1;
+				AILog.Info("Radius = " + this.radius);
+			}
+			this.radius = this.radius < 0 ? 0 : this.radius;
 		}
 		this.Sleep(1);
 	}

@@ -1,3 +1,5 @@
+require("utils.nut");
+ 
 class EAIRoute{
 
 	station_from = null;
@@ -5,6 +7,7 @@ class EAIRoute{
 	tile_from = null;
 	tile_to = null;
 	cargo_type = null;
+	Utils = EAIUtils();
 	
 	vehicles = null;
 	
@@ -110,7 +113,34 @@ class EAIRoute{
 		return oldest;
 	}
 	
+	function YoungestAge(){
+		if(this.vehicles.len() == 0){return -1;}
+		local youngest = AIVehicle.GetAge(this.vehicles[0]);
+		for(local i = 0; i < this.vehicles.len(); i++){
+			local age = AIVehicle.GetAge(this.vehicles[i]);
+			youngest = youngest < age ? youngest : age;
+		}
+		return youngest;
+	}
+	
 	function AsString(){
 		return AIStation.GetName(this.station_from) + " <-> " + AIStation.GetName(this.station_to) + " (" + this.cargo_type + ")";
+	}
+	
+	function GetCargoWaitingAmount(){
+		local cargoID = Utils.GetCargoTypeFromName(this.cargo_type);
+		local sum = AIStation.GetCargoWaitingVia(station_from,station_to,cargoID) +
+					AIStation.GetCargoWaitingVia(station_to,station_from,cargoID) +
+					AIStation.GetCargoWaitingVia(station_from,AIStation.STATION_INVALID,cargoID) +
+					AIStation.GetCargoWaitingVia(station_from,AIStation.STATION_INVALID,cargoID); 
+		return sum;
+	}
+	
+	function GetTownFrom(){
+		return AITile.GetClosestTown(this.tile_from);
+	}
+	
+	function GetTownTo(){
+		return AITile.GetClosestTown(this.tile_to);
 	}
 }
