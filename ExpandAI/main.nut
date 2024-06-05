@@ -24,6 +24,7 @@ class ExpandAI extends AIController
   function DismantleUnprofitableRoutes();
   function GetPaxRouteFromVehicle(vehicle);
   function IsRouteBlacklisted(town1, town2);
+  function WaitForFunds();
   
   routes = null;
   blacklistedRoutes = null;
@@ -155,9 +156,10 @@ function ExpandAI::BuildRoute(town1, town2){
 	
 	local route = EAIRoute(stationFrom,stationTo,"Passengers");
 	local vehicle = route.BuyVehicle(null,this.depot);
+	if(vehicle == null || !AIVehicle.IsValidVehicle(vehicle)){return null;}
 	
 	this.routes.append(route);
-	AILog.Info(AITown.GetName(town1) + " -> " + AITown.GetName(town2));
+	AILog.Info("Built route " + route.AsString());
 	return vehicle;
 }
 
@@ -192,9 +194,13 @@ function ExpandAI::BuildDepot(town){
 					(AIRoad.IsRoadTile(t3) && AIRoad.BuildRoadDepot(tile,t3)) ||
 					(AIRoad.IsRoadTile(t4) && AIRoad.BuildRoadDepot(tile,t4))
 				){	
-					AILog.Info("Deposito criado em "+ AITown.GetName(this.town) + ": " + tile);
-					AIRoad.BuildRoad(tile,t1); AIRoad.BuildRoad(tile,t2);
-					AIRoad.BuildRoad(tile,t3); AIRoad.BuildRoad(tile,t4); 
+					AILog.Info("Built depot in "+ AITown.GetName(this.town) + ": " + tile);
+					local hasConnected = AIRoad.BuildRoad(tile,t1) || AIRoad.BuildRoad(tile,t2) ||AIRoad.BuildRoad(tile,t3) || AIRoad.BuildRoad(tile,t4);
+					if(!hasConnected){
+						AILog.Info("Bad spot! Retrying...");
+						AITile.DemolishTile(tile);
+						continue;
+					}
 					return tile;
 				}
 			}
@@ -293,8 +299,30 @@ function ExpandAI::ExpandRoutesAsNeeded(){
 		if(route.ProfitsLastYear() > 1000 && route.GetCargoWaitingAmount() > 750 && route.YoungestAge() > 180){
 			AILog.Info("Expanding route: " + route.AsString());
 			route.BuyVehicle(null,this.depot);
-			break;
 		}
+	}
+}
+
+function ExpandAI::WaitForFunds(){
+	local amountToKeep = AICompany.GetQuarterlyIncome(AICompany.COMPANY_SELF,AICompany.CURRENT_QUARTER)/3;
+	amountToKeep = amountToKeep < 3000 ? 3000 : amountToKeep;
+	local hasWaited = false;
+	if(AICompany.GetBankBalance(AICompany.COMPANY_SELF) < amountToKeep){
+		AILog.Info("Waiting for " + amountToKeep + " in funds");
+		hasWaited = true;
+	}
+	
+	while(AICompany.GetBankBalance(AICompany.COMPANY_SELF) < amountToKeep){
+		this.Sleep(100);
+		this.DismantleUnprofitableRoutes();
+		if(AICompany.GetBankBalance(AICompany.COMPANY_SELF) > AICompany.GetLoanAmount() && AICompany.GetLoanAmount() > 0){
+			AILog.Info("Paying Loan :D");
+			AICompany.SetLoanAmount(0);
+		}
+	}
+	
+	if(hasWaited){
+		AILog.Info("Wait done");
 	}
 }
 
@@ -310,16 +338,10 @@ function ExpandAI::Start() {
 	//BuildRoutes(depot);
 	
 	this.Sleep(50);
+	local count = 0;
 	
 	while (true) {
-		//AILog.Info("Tick " + this.GetTick());
-		//AILog.Info("THE G");
-		local amountToKeep = AICompany.GetQuarterlyIncome(AICompany.COMPANY_SELF,AICompany.CURRENT_QUARTER);
-		amountToKeep = amountToKeep < 10000 ? 10000 : amountToKeep;
-		while(AICompany.GetBankBalance(AICompany.COMPANY_SELF) < amountToKeep){
-			this.Sleep(100);
-			this.DismantleUnprofitableRoutes();
-		}
+		this.WaitForFunds();
 		this.DismantleUnprofitableRoutes();
 		this.ExpandRoutesAsNeeded();
 		//AILog.Info("Tick " + AIController.GetTick());
@@ -328,10 +350,13 @@ function ExpandAI::Start() {
 			local addValue = this.radius / 150;//this.radius/50;
 			if(this.radius <= AIMap.GetMapSizeX()*10 && this.radius <= AIMap.GetMapSizeY()*10){
 				this.radius += addValue > 0 ? addValue : 1;
-				AILog.Info("Radius = " + this.radius);
+				if(count%10 == 0){
+					AILog.Info("Radius = " + this.radius);
+				}
 			}
 			this.radius = this.radius < 0 ? 0 : this.radius;
 		}
 		this.Sleep(1);
+		count++;
 	}
 }
