@@ -1,5 +1,0 @@
-class EAIPathUtils
-{
-	function Teste(){}
-}
-
